@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Time Híbrido → Garmin</title>
+  <meta name="description" content="Veja e edite os treinos da planilha do Time Híbrido e envie para o Garmin Connect por um script colado na aba do navegador.">
+  <link rel="icon" href="assets/logo_time_hibrido.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="web/style.css">
+</head>
+<body>
+  <header class="topo">
+    <div class="marca">
+      <img src="assets/logo_time_hibrido.png" alt="Time Híbrido" class="logo">
+      <h1>Treinos <span class="neon">→ Garmin</span></h1>
+    </div>
+    <div class="fonte" id="fonte" aria-live="polite"></div>
+    <div class="acoes-topo">
+      <label class="btn btn-claro" title="Abrir outra planilha .xlsx">
+        <input type="file" id="arquivo" accept=".xlsx,.xlsm" hidden>Abrir planilha
+      </label>
+      <button class="btn btn-claro" id="btn-baixar" title="Baixar a planilha com as suas edições">Baixar planilha</button>
+      <details class="menu">
+        <summary class="btn btn-claro" aria-label="Mais opções">⋯</summary>
+        <div class="menu-itens">
+          <button id="btn-recarregar">Recarregar planilha do projeto</button>
+          <button id="btn-descartar">Descartar todas as edições</button>
+        </div>
+      </details>
+    </div>
+  </header>
+
+  <section class="config" id="config" hidden>
+    <label class="campo">
+      <span>Semana 1 começa na segunda</span>
+      <input type="date" id="cfg-inicio">
+      <small id="cfg-inicio-aviso" class="aviso-txt"></small>
+    </label>
+    <div class="campo">
+      <span>Dia de cada treino de musculação</span>
+      <div class="dias-musc" id="cfg-dias"></div>
+    </div>
+    <div class="campo">
+      <span>Mostrar</span>
+      <div class="segmentado" id="filtro" role="tablist">
+        <button data-f="tudo" class="ativo">Tudo</button>
+        <button data-f="corrida">Corrida</button>
+        <button data-f="musculacao">Musculação</button>
+      </div>
+    </div>
+    <label class="campo campo-check">
+      <input type="checkbox" id="cfg-passadas">
+      <span>Esconder semanas que já passaram</span>
+    </label>
+  </section>
+
+  <main class="layout">
+    <section class="semanas" id="semanas" aria-label="Semanas do plano">
+      <div class="vazio" id="vazio">
+        <p class="vazio-titulo">Carregando a planilha…</p>
+      </div>
+    </section>
+
+    <aside class="envio" id="envio" hidden>
+      <h2>Enviar ao Garmin</h2>
+      <p class="contagem" id="contagem"></p>
+      <div class="presets">
+        <button data-p="futuro">De hoje em diante</button>
+        <button data-p="todos">Todos</button>
+        <button data-p="editados">Editados</button>
+        <button data-p="nenhum">Nenhum</button>
+      </div>
+
+      <fieldset>
+        <legend>Calendário</legend>
+        <label><input type="radio" name="agendar" value="manter" checked> Manter as datas que já estão no Garmin <small>agenda só o que ainda não está no calendário</small></label>
+        <label><input type="radio" name="agendar" value="mover"> Colocar na data do plano <small>move os selecionados para a data mostrada aqui</small></label>
+        <label><input type="radio" name="agendar" value="nao"> Não mexer no calendário <small>só cria/atualiza em "Meus treinos"</small></label>
+      </fieldset>
+      <fieldset>
+        <legend>Se o treino já existe no Garmin</legend>
+        <label><input type="radio" name="existente" value="pular" checked> Pular</label>
+        <label><input type="radio" name="existente" value="substituir"> Substituir pelo da planilha</label>
+        <small class="nota">Treinos editados aqui são substituídos quando estão diferentes no Garmin.</small>
+      </fieldset>
+      <label class="check-simular"><input type="checkbox" id="simular"> Só simular <small>mostra o que faria, sem gravar nada</small></label>
+
+      <button class="btn btn-neon" id="btn-gerar">Gerar script</button>
+      <p class="avisos-envio" id="avisos-envio"></p>
+
+      <div class="script" id="script" hidden>
+        <div class="script-acoes">
+          <button class="btn btn-neon" id="btn-copiar">Copiar script</button>
+          <button class="btn btn-escuro" id="btn-baixar-js">Baixar .js</button>
+        </div>
+        <p class="script-info" id="script-info"></p>
+        <ol class="passos">
+          <li>Abra o <a href="https://connect.garmin.com/app/calendar" target="_blank" rel="noopener">calendário do Garmin Connect</a> já logado.</li>
+          <li><kbd>F12</kbd> → aba <b>Console</b> → cole e aperte <kbd>Enter</kbd>. Se o navegador bloquear a colagem, digite <code>allow pasting</code> e cole de novo.</li>
+          <li>Quando o painel no canto pedir, clique na seta <b>‹ ›</b> do mês (ou em <b>Ano</b>). O painel mostra o progresso e confere tudo no fim.</li>
+        </ol>
+        <p class="nota">Pode colar de novo sem medo: o que já foi feito é pulado.</p>
+      </div>
+    </aside>
+  </main>
+
+  <aside class="gaveta" id="gaveta" hidden aria-modal="true" role="dialog" aria-labelledby="gaveta-titulo">
+    <div class="gaveta-fundo" data-fechar></div>
+    <div class="gaveta-painel">
+      <header class="gaveta-topo">
+        <div>
+          <p class="gaveta-sub" id="gaveta-sub"></p>
+          <h2 id="gaveta-titulo"></h2>
+        </div>
+        <button class="btn-x" data-fechar aria-label="Fechar">×</button>
+      </header>
+      <div class="gaveta-corpo" id="gaveta-corpo"></div>
+    </div>
+  </aside>
+
+  <datalist id="dl-exercicios"></datalist>
+  <datalist id="dl-tecnicas"></datalist>
+  <datalist id="dl-catalogo"></datalist>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="web/builder.js"></script>
+  <script src="web/uploader.js"></script>
+  <script src="web/app.js"></script>
+</body>
+</html>

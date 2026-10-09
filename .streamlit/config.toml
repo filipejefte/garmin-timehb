@@ -1,0 +1,11 @@
+# Tema base do Streamlit alinhado à identidade do Time Híbrido.
+# O visual fino (tipografia condensada, setas de etapa, faixas) vem do tema.py.
+[theme]
+base = "light"
+primaryColor = "#00BF63"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F8F3"
+textColor = "#165745"
+
+[browser]
+gatherUsageStats = false

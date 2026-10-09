@@ -1,0 +1,24 @@
+# Segredos — sessão do Garmin copiada do navegador (cookies/JWT/CSRF). NUNCA commitar.
+garmin-curl.txt
+garmin-curl*.txt
+*.curl.txt
+csrf.txt
+.env
+
+# Configuração local do Claude
+.claude/settings.local.json
+
+# Gerados
+__pycache__/
+*.py[cod]
+th_preview.json
+
+# Ambientes
+.venv/
+venv/
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
