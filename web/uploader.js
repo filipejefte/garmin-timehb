@@ -67,6 +67,17 @@
     painel.append(topo, linhaStatus, trilho, detalhe);
     document.body.appendChild(painel);
     const status = (msg, cor) => { linhaStatus.textContent = msg; linhaStatus.style.color = cor || '#F4F8F3'; };
+    // pergunta no próprio painel (sem alert/confirm, que travam a página)
+    const perguntar = (sim, nao) => new Promise((resolve) => {
+      const caixa = el('div', { display: 'flex', gap: '8px', marginTop: '10px' });
+      const botao = (txt, fundo, cor, valor) => {
+        const b = el('button', { flex: '1', padding: '8px 10px', borderRadius: '8px', border: '0', cursor: 'pointer', fontWeight: '700', background: fundo, color: cor }, txt);
+        b.onclick = () => { caixa.remove(); resolve(valor); };
+        return b;
+      };
+      caixa.append(botao(sim, '#3CFF00', '#042705', true), botao(nao, 'rgba(255,255,255,.12)', '#F4F8F3', false));
+      painel.appendChild(caixa);
+    });
     const progresso = (feito, total) => { barra.style.width = (total ? Math.round((100 * feito) / total) : 0) + '%'; };
 
     // ------------------------------------------------------------------
@@ -202,18 +213,23 @@
     const feitos = new Set(ck.feitos);
     const salvarCk = () => { try { localStorage.setItem(CHAVE_CK, JSON.stringify({ feitos: [...feitos], andamento: ck.andamento })); } catch (e) { /* sem espaço */ } };
 
-    // "Impressão digital" do treino: o que aparece no relógio. Serve para não
-    // substituir à toa um treino editado que já foi enviado igualzinho.
+    // "Impressão digital" do treino: o que aparece no relógio. Serve para (1) não
+    // substituir à toa um treino editado que já foi enviado igualzinho e (2) não
+    // reaproveitar um treino de OUTRO plano que tem o mesmo nome (ex.: um PDF novo).
     function assinatura(w) {
       const n = (v) => (v === undefined || v === null || v === '' ? null : v);
-      const passo = (s) => [
-        s.type, s.stepType && s.stepType.stepTypeKey, s.endCondition && s.endCondition.conditionTypeKey,
-        n(s.endConditionValue) === null ? null : Number(s.endConditionValue),
-        s.type === 'RepeatGroupDTO' ? null : ((s.targetType && s.targetType.workoutTargetTypeKey) || 'no.target'),
-        n(s.zoneNumber), n(s.category), n(s.exerciseName), n(s.description), n(s.numberOfIterations),
-        (s.workoutSteps || []).map(passo),
-      ];
-      return JSON.stringify([w.workoutName, n(w.description), w.sportType && w.sportType.sportTypeKey,
+      const t = (v) => (n(v) === null ? null : String(v).replace(/\s+/g, ' ').trim() || null);
+      const passo = (s) => {
+        const cond = s.endCondition && s.endCondition.conditionTypeKey;
+        return [
+          s.type, s.stepType && s.stepType.stepTypeKey, cond,
+          cond === 'lap.button' || n(s.endConditionValue) === null ? null : Number(s.endConditionValue),
+          s.type === 'RepeatGroupDTO' ? null : ((s.targetType && s.targetType.workoutTargetTypeKey) || 'no.target'),
+          n(s.zoneNumber), n(s.category), n(s.exerciseName), t(s.description), n(s.numberOfIterations),
+          (s.workoutSteps || []).map(passo),
+        ];
+      };
+      return JSON.stringify([t(w.workoutName), t(w.description), w.sportType && w.sportType.sportTypeKey,
         (w.workoutSegments || []).map((sg) => (sg.workoutSteps || []).map(passo))]);
     }
 
@@ -243,14 +259,21 @@
       }
 
       let substituir = ids.length > 0 && (it.editado || OPC.existente === 'substituir');
-      let igual = false;
-      if (substituir && OPC.existente !== 'substituir' && ids.length === 1) {
-        // editado aqui — mas talvez já tenha sido enviado assim: compara com o que está no Garmin
+      let igual = null;                          // null = não deu para comparar
+      if (ids.length && OPC.existente !== 'substituir') {
+        // compara com o que está no Garmin: editado já enviado? treino de outro plano com o mesmo nome?
         try {
           const atual = await api('GET', `/workout-service/workout/${ids[0]}`);
-          igual = !!atual && assinatura(atual) === assinatura(it.payload);
-        } catch (e) { if (e.sessao) throw e; /* na dúvida, substitui */ }
-        if (igual) substituir = false;
+          if (atual) igual = assinatura(atual) === assinatura(it.payload);
+        } catch (e) { if (e.sessao) throw e; /* na dúvida, segue a regra sem comparar */ }
+        if (igual && ids.length === 1) substituir = false;
+        if (igual === false && !it.editado) {
+          // mesmo nome, conteúdo diferente e você não editou: provavelmente é de outro plano. Não mexe.
+          p.conflito = true;
+          p.treino = 'CONFLITO: mesmo nome, outro conteúdo';
+          p.cal = 'não mexe';
+          return p;
+        }
       }
       if (substituir) { p.apagar = ids; p.criar = true; p.treino = it.editado ? 'substituir (editado)' : 'substituir'; }
       else if (ids.length) { p.reusar = ids[0]; p.treino = igual ? 'já está igual' : 'já existe'; }
@@ -284,7 +307,8 @@
     // ------------------------------------------------------------------
     // Execução
     // ------------------------------------------------------------------
-    const res = { criados: 0, substituidos: 0, reaproveitados: 0, agendados: 0, desagendados: 0, retomados: 0, erros: 0 };
+    const res = { criados: 0, substituidos: 0, reaproveitados: 0, agendados: 0, desagendados: 0, retomados: 0, conflitos: 0, erros: 0 };
+    const AVISO_CONFLITO = 'têm o mesmo nome de treinos que já estão no seu Garmin, mas com outro conteúdo (outro plano?). Não mexi neles. Para enviar o plano novo sem misturar, use um prefixo nos nomes (campo "Prefixo" na página) — ou marque "Substituir".';
     try {
       status('Lendo seus treinos e o calendário no Garmin…');
       const conta = await lerConta();
@@ -294,15 +318,33 @@
       console.log(`Na conta: ${nTreinos} nomes de treino · ${[...conta.agenda.values()].reduce((s, v) => s + v.length, 0)} agendamentos lidos`);
       console.table(plano.map((p) => ({ data: p.it.data, nome: p.it.nome, treino: feitos.has(p.it.k) ? 'feito (retomada)' : p.treino, calendário: p.cal })));
 
+      const conflitos = plano.filter((p) => p.conflito);
+      if (conflitos.length) console.warn(`⚠️ ${conflitos.length} treino(s) ${AVISO_CONFLITO}`, conflitos.map((p) => p.it.nome));
+
       if (OPC.simular) {
         const c = (f) => plano.filter(f).length;
-        status('Simulação pronta — nada foi gravado.', '#3CFF00');
+        status(conflitos.length ? `Simulação pronta — ${conflitos.length} conflito(s) de nome` : 'Simulação pronta — nada foi gravado.', conflitos.length ? '#E6FF0A' : '#3CFF00');
         progresso(1, 1);
         detalhe.textContent =
-          `${c((p) => p.criar && !p.apagar.length)} a criar · ${c((p) => p.apagar.length > 0)} a substituir · ${c((p) => !p.criar)} já existem\n` +
+          (conflitos.length ? `⚠️ ${conflitos.length} ${AVISO_CONFLITO}\n\n` : '') +
+          `${c((p) => p.criar && !p.apagar.length)} a criar · ${c((p) => p.apagar.length > 0)} a substituir · ${c((p) => !p.criar && !p.conflito)} já existem\n` +
           `${plano.reduce((s, p) => s + p.agendar.length, 0)} datas a agendar · ${plano.reduce((s, p) => s + p.desagendar.length, 0)} a remover\n` +
           'Detalhes na tabela do Console. Para gravar, gere o script sem "Só simular".';
         return { simulacao: true, plano: plano.map((p) => ({ data: p.it.data, nome: p.it.nome, treino: p.treino, calendario: p.cal })) };
+      }
+
+      if (conflitos.length && conflitos.length < plano.length - feitos.size) {
+        // antes de gravar qualquer coisa: pode ser um plano novo com os mesmos nomes do antigo
+        status(`⚠️ ${conflitos.length} conflito(s) de nome — nada foi gravado ainda`, '#E6FF0A');
+        detalhe.textContent = `${conflitos.length} ${AVISO_CONFLITO}\n\nContinuar envia só os outros ${plano.length - conflitos.length}.`;
+        if (!(await perguntar('Continuar sem eles', 'Cancelar'))) {
+          status('Cancelado — nada foi gravado.', '#E6FF0A');
+          return { cancelado: true, conflitos: conflitos.length };
+        }
+      } else if (conflitos.length) {
+        status(`⚠️ Todos os ${conflitos.length} treinos têm conflito de nome — nada a fazer`, '#E6FF0A');
+        detalhe.textContent = `${conflitos.length} ${AVISO_CONFLITO}`;
+        return { conflitos: conflitos.length };
       }
 
       if (feitos.size) console.log(`↩️  Retomando: ${feitos.size} item(ns) já feitos numa execução anterior.`);
@@ -311,6 +353,7 @@
         n++; progresso(n - 1, plano.length);
         const it = p.it;
         if (feitos.has(it.k)) { res.retomados++; continue; }
+        if (p.conflito) { res.conflitos++; console.warn(`⚠️ ${it.nome}: mesmo nome de um treino com outro conteúdo — não mexi`); continue; }
         status(`${n}/${plano.length} · ${it.nome}`);
         try {
           ck.andamento = { k: it.k, datas: p.agendar }; salvarCk();
@@ -343,15 +386,17 @@
       const depois = await lerConta();
       const faltando = ITENS.filter((it) => !depois.porNome.has(it.nome)).map((it) => it.nome);
       const duplicados = ITENS.filter((it) => (depois.porNome.get(it.nome) || []).length > 1).map((it) => it.nome);
-      const semData = OPC.agendar === 'nao' ? [] : ITENS.filter((it) => it.data && !(depois.agenda.get(it.nome) || []).length).map((it) => it.nome);
+      const emConflito = new Set(conflitos.map((p) => p.it.k));
+      const semData = OPC.agendar === 'nao' ? [] : ITENS.filter((it) => it.data && !emConflito.has(it.k) && !(depois.agenda.get(it.nome) || []).length).map((it) => it.nome);
       if (faltando.length) console.warn('⚠️ Não encontrei no Garmin:', faltando);
       if (duplicados.length) console.warn('⚠️ Nome repetido no Garmin (apague a cópia):', duplicados);
       if (semData.length) console.warn('⚠️ Sem data no calendário:', semData);
 
-      const ok = !res.erros && !faltando.length && !duplicados.length && !semData.length;
+      const ok = !res.erros && !faltando.length && !duplicados.length && !semData.length && !res.conflitos;
       if (!res.erros) { try { localStorage.removeItem(CHAVE_CK); } catch (e) { /* ok */ } }
       status(ok ? '✅ Pronto! Confira o calendário.' : '⚠️ Terminou com pendências — veja o Console.', ok ? '#3CFF00' : '#E6FF0A');
       detalhe.textContent =
+        (res.conflitos ? `⚠️ ${res.conflitos} ${AVISO_CONFLITO}\n\n` : '') +
         `criados ${res.criados} · substituídos ${res.substituidos} · já existiam ${res.reaproveitados}\n` +
         `agendados ${res.agendados} · removidos ${res.desagendados} · erros ${res.erros}` +
         (faltando.length ? `\nfaltando ${faltando.length}` : '') + (duplicados.length ? `\nduplicados ${duplicados.length}` : '') +

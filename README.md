@@ -20,6 +20,16 @@ não é enviada para lugar nenhum.
 
 **O que dá para fazer**
 
+- Abrir o **PDF do plano do Time Híbrido** direto na página (botão *Abrir PDF ou
+  planilha*): a leitura acontece no navegador, com as mesmas regras do
+  `pdf_para_planilha.py`, e os exercícios já vêm ligados ao catálogo do Garmin
+  pelo De-para padrão (`web/depara.js`). Lê durações em minutos e em segundos
+  (`30 SEG`), prova por km e os detalhes do PDF (ex.: `( BULGARO 12 CADA PERNA )`).
+  Um plano aberto por PDF começa na próxima segunda — mude no campo do topo.
+  Confira os treinos depois de abrir e use *Baixar planilha* para guardar em `.xlsx`.
+- **Prefixo nos nomes** (opcional): para ter dois planos no Garmin sem misturar
+  (ex.: `3K S01 · Intervalado 1:1` ao lado do `S01 · Intervalado 1:1` do plano
+  anterior).
 - Ver os 95 treinos por semana, com a data calculada a partir da segunda-feira
   da semana 1 e dos dias da musculação (A=Sáb, B=Dom, C=Seg, D=Ter, E=Qua).
 - Clicar num treino para editar: corrida (dia, tipo, repetições, tempos,
@@ -28,6 +38,10 @@ não é enviada para lugar nenhum.
   relógio. As edições ficam guardadas no navegador; **Baixar planilha** gera o
   `.xlsx` atualizado para substituir o `data/time_hibrido.xlsx`.
 - Selecionar o que enviar e **Gerar script**.
+
+**Apoie o projeto** — o botão *Apoiar o projeto*, no topo, abre o Pix para
+doação (valor livre). A chave e o QR ficam no topo de `web/app.js` (`PIX`) e em
+`assets/pix-qr.png`.
 
 **Enviar ao Garmin**
 
@@ -51,6 +65,12 @@ O painel mostra o progresso e, no fim, confere no Garmin se tudo ficou certo
 | Não mexer no calendário | Só cria/atualiza em "Meus treinos". |
 | Se já existe: pular / substituir | Treino com o mesmo nome é reaproveitado ou recriado. Treinos editados na página são substituídos quando estão diferentes do que está no Garmin. |
 | Só simular | Lista no Console o que faria, sem gravar nada. |
+
+**Proteção contra outro plano com os mesmos nomes:** antes de gravar, o script
+compara cada treino com o que já está no Garmin. Se um treino tem o mesmo nome
+mas outro conteúdo (e você não o editou na página), ele **não mexe** nesse treino
+e pergunta no painel se deve continuar só com os outros — a saída é usar um
+prefixo nos nomes ou marcar *Substituir*.
 
 O script é seguro para colar de novo: o que já foi feito é pulado. Se a sessão
 cair no meio, recarregue a página do Garmin, entre na conta se pedir e cole o
@@ -127,7 +147,9 @@ Requer Python 3.10+. No Windows, se `python` abrir a Microsoft Store, use `py`.
 ```
 index.html              # interface web (GitHub Pages) — ver, editar e gerar o script de envio
 web/
-  app.js                # interface: planilha, semanas, editor, seleção
+  app.js                # interface: planilha/PDF, semanas, editor, seleção, Pix
+  pdf-plano.js          # leitura do PDF do plano no navegador (port do pdf_para_planilha.py)
+  depara.js             # De-para padrão exercício -> Garmin (de de_para_exercicios.py)
   builder.js            # planilha -> JSON do Garmin (mesmas regras do Python)
   uploader.js           # script que roda na aba do Garmin Connect
   style.css             # visual Time Híbrido

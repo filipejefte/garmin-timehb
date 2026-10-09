@@ -89,7 +89,13 @@
 
   function labelCorrida(r) {
     const t = tipoCorrida(r);
-    if (t === 'intervalado') return `Intervalado ${g(num(r.esforco_min, 0))}:${g(num(r.recuperacao_min, 0))}`;
+    if (t === 'intervalado') {
+      // minutos inteiros: "Intervalado 4:2" (como sempre foi); com segundos: "Intervalado 30s:90s"
+      const a = num(r.esforco_min, 0), b = num(r.recuperacao_min, 0);
+      if (Number.isInteger(+a.toFixed(4)) && Number.isInteger(+b.toFixed(4))) return `Intervalado ${g(a)}:${g(b)}`;
+      const rot = (m) => { const s = Math.round(m * 60); return s % 60 === 0 ? `${s / 60}min` : `${s}s`; };
+      return `Intervalado ${rot(a)}:${rot(b)}`;
+    }
     if (t === 'continuo') return `Contínuo ${g(num(r.esforco_min, 0))} min`;
     if (t === 'prova') return `Prova ${g(num(r.distancia_km, 5))} km`;
     return `? ${txt(r.tipo)}`;
@@ -254,7 +260,7 @@
 
     if (piramide) {
       const seq = r0.join('-');
-      const nota = `${e0.nomePt} · ${tec} ${seq} (baixe a rep a cada série)`;
+      const nota = `${e0.nomePt} · ${tec} ${seq} (baixe a rep a cada série)${e0.notas ? ' · ' + e0.notas : ''}`;
       const filhos = [passoExercicio(ordem + 1, e0.cat, e0.ex, r0[0], nota, aq), passoDescanso(ordem + 2, e0.descanso)];
       return [[grupoRepeticao(ordem, r0.length, filhos)], ordem + 3];
     }
@@ -262,7 +268,7 @@
       const series = e0.series || 1;
       const filhos = []; let o = ordem + 1;
       r0.forEach((r, i) => {
-        filhos.push(passoExercicio(o++, e0.cat, e0.ex, r, `${e0.nomePt} · ${tec} (${i + 1}/${r0.length})`, aq));
+        filhos.push(passoExercicio(o++, e0.cat, e0.ex, r, `${e0.nomePt} · ${tec} (${i + 1}/${r0.length})${e0.notas ? ' · ' + e0.notas : ''}`, aq));
         if (i < r0.length - 1) filhos.push(passoDescansoLap(o++, 'Troque a carga - aperte Lap para seguir'));
       });
       filhos.push(passoDescanso(o++, e0.descanso));
@@ -273,12 +279,15 @@
     const filhos = [];
     exs.forEach((e, j) => {
       const marca = multi ? `${tec} (${j + 1}/${exs.length})` : tec;
-      filhos.push(passoExercicio(ordem++, e.cat, e.ex, e.repsLista[0], `${e.nomePt} · ${marca}`, aq));
+      filhos.push(passoExercicio(ordem++, e.cat, e.ex, e.repsLista[0], `${e.nomePt} · ${marca}${e.notas ? ' · ' + e.notas : ''}`, aq));
       if (multi && j < exs.length - 1) filhos.push(passoDescansoLap(ordem++));
     });
     filhos.push(passoDescanso(ordem++, e0.descanso));
     return [[grupoRepeticao(go, series, filhos)], ordem];
   }
+
+  /** Chave tolerante para o De-para: sem acento, sem espaço sobrando ("TRICEPS C/CORDA" = "TRÍCEPS C/ CORDA"). */
+  const chaveSolta = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s*\/\s*/g, '/ ').replace(/\s+/g, ' ').trim();
 
   /** Agrupa as linhas da aba Musculação em treinos (semana × letra). */
   function agruparMusculacao(linhas, depara) {
@@ -295,13 +304,14 @@
         if (d.aquecimento === null) d.aquecimento = nomePt || 'AQUECIMENTO';
         continue;
       }
-      const m = depara[nomePt.toUpperCase()];
+      const m = depara[nomePt.toUpperCase()] || depara['~' + chaveSolta(nomePt)];
       if (!m || !m.cat || !m.ex) { d.avisos.push(`"${nomePt}" sem par no De-para — fica de fora`); continue; }
       const bloco = vazio(row.bloco) ? '·' : String(row.bloco);
       if (!d.blocos.has(bloco)) d.blocos.set(bloco, { tecnica: row.tecnica, exs: [] });
       d.blocos.get(bloco).exs.push({
         cat: m.cat, ex: m.ex, repsLista: repsLista(row.reps), repsBruto: row.reps,
         series: parseInt(row.series, 10), descanso: parseInt(num(row.descanso_seg, 0) || 60, 10), nomePt,
+        notas: txt(row.notas),
       });
     }
     return dias;
@@ -328,7 +338,7 @@
   // =====================================================================
   /**
    * @param plano  {corrida:[linhas], musculacao:[linhas], depara:{PT:{cat,ex}}}
-   * @param config {inicio:'AAAA-MM-DD' (segunda da semana 1), diasMusc:{A..E: 0-6}}
+   * @param config {inicio:'AAAA-MM-DD' (segunda da semana 1), diasMusc:{A..E: 0-6}, prefixo?:'3K'}
    * @returns lista de treinos {chave,tipo,semana,etapa,dia,treino,data,nome,resumo,payload,avisos}
    */
   function montarPlano(plano, config) {
@@ -366,6 +376,10 @@
       });
     }
     out.forEach((t) => { if (t.tipo === 'musculacao' && !t.etapa) t.etapa = etapaDaSemana[t.semana] || ''; });
+
+    // prefixo opcional por plano ("3K S01 · Intervalado 1:1") — separa planos diferentes no Garmin
+    const pre = String(config.prefixo || '').trim();
+    if (pre) out.forEach((t) => { t.nome = `${pre} ${t.nome}`; if (t.payload) t.payload.workoutName = t.nome; });
 
     // nomes repetidos quebram o dedupe (o Garmin é consultado pelo nome)
     const cont = {};
@@ -411,7 +425,7 @@
   const API = {
     DIA_SEMANA, ROTULOS_DIA, NOME_DIA, TREINOS, DIAS_MUSC_PADRAO, GRUPO_CURTO, AQUECIMENTO, ROTULO_AQUEC,
     addDias, offsetsMusc, montarPlano, estrutura, nomeCorrida, labelCorrida, tipoCorrida, grupoCurto, nomeMusc,
-    tipoAquecimento, repsLista, ePiramide,
+    tipoAquecimento, repsLista, ePiramide, chaveSolta,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else raiz.THBuilder = API;

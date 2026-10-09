@@ -19,8 +19,9 @@
     </div>
     <div class="fonte" id="fonte" aria-live="polite"></div>
     <div class="acoes-topo">
-      <label class="btn btn-claro" title="Abrir outra planilha .xlsx">
-        <input type="file" id="arquivo" accept=".xlsx,.xlsm" hidden>Abrir planilha
+      <button class="btn btn-apoio" id="btn-apoiar" aria-haspopup="dialog"><span aria-hidden="true">♥</span> Apoiar o projeto</button>
+      <label class="btn btn-claro" title="Abrir o PDF do Time Híbrido ou uma planilha .xlsx">
+        <input type="file" id="arquivo" accept=".pdf,.xlsx,.xlsm" hidden>Abrir PDF ou planilha
       </label>
       <button class="btn btn-claro" id="btn-baixar" title="Baixar a planilha com as suas edições">Baixar planilha</button>
       <details class="menu">
@@ -43,6 +44,10 @@
       <span>Dia de cada treino de musculação</span>
       <div class="dias-musc" id="cfg-dias"></div>
     </div>
+    <label class="campo">
+      <span>Prefixo nos nomes <small>(opcional)</small></span>
+      <input type="text" id="cfg-prefixo" maxlength="12" placeholder="ex.: 3K" class="input-curto" autocomplete="off">
+    </label>
     <div class="campo">
       <span>Mostrar</span>
       <div class="segmentado" id="filtro" role="tablist">
@@ -58,11 +63,14 @@
   </section>
 
   <main class="layout">
-    <section class="semanas" id="semanas" aria-label="Semanas do plano">
-      <div class="vazio" id="vazio">
-        <p class="vazio-titulo">Carregando a planilha…</p>
-      </div>
-    </section>
+    <div class="principal">
+      <div class="relatorio" id="relatorio" hidden></div>
+      <section class="semanas" id="semanas" aria-label="Semanas do plano">
+        <div class="vazio" id="vazio">
+          <p class="vazio-titulo">Carregando a planilha…</p>
+        </div>
+      </section>
+    </div>
 
     <aside class="envio" id="envio" hidden>
       <h2>Enviar ao Garmin</h2>
@@ -121,6 +129,33 @@
     </div>
   </aside>
 
+  <dialog class="doacao" id="doacao" aria-labelledby="doacao-titulo">
+    <form method="dialog" class="doacao-fechar"><button class="btn-x" aria-label="Fechar">×</button></form>
+    <p class="doacao-sub">Pix · qualquer valor</p>
+    <h2 id="doacao-titulo">Apoie o projeto</h2>
+    <p>Esta ferramenta é gratuita e feita nas horas vagas. Se ela te poupou tempo, uma doação ajuda a mantê-la funcionando — <b>você escolhe o valor</b>.</p>
+    <figure class="pix-qr" id="pix-qr-box">
+      <img id="pix-qr" alt="QR code Pix para doação" width="220" height="220">
+      <figcaption>Abra o app do seu banco → <b>Pix</b> → <b>Ler QR code</b> e digite o valor que quiser.</figcaption>
+    </figure>
+    <div class="pix-linha">
+      <div>
+        <span class="pix-rotulo">Chave Pix (celular)</span>
+        <b class="pix-valor" id="pix-chave"></b>
+      </div>
+      <button class="btn btn-escuro" id="btn-copiar-chave">Copiar chave</button>
+    </div>
+    <div class="pix-linha" id="pix-cc-box" hidden>
+      <div>
+        <span class="pix-rotulo">Pix copia e cola</span>
+        <span class="pix-cc" id="pix-cc"></span>
+      </div>
+      <button class="btn btn-claro" id="btn-copiar-cc">Copiar código</button>
+    </div>
+    <p class="nota" id="pix-recebedor" hidden></p>
+    <p class="doacao-obrigado">Obrigado! ♥</p>
+  </dialog>
+
   <datalist id="dl-exercicios"></datalist>
   <datalist id="dl-tecnicas"></datalist>
   <datalist id="dl-catalogo"></datalist>
@@ -128,6 +163,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="web/builder.js"></script>
+  <script src="web/depara.js"></script>
+  <script src="web/pdf-plano.js"></script>
   <script src="web/uploader.js"></script>
   <script src="web/app.js"></script>
 </body>

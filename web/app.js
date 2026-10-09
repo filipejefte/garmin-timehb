@@ -20,6 +20,18 @@
   const CONFIG_PADRAO = { inicio: '2026-08-31', diasMusc: { ...B.DIAS_MUSC_PADRAO } };
   const CHAVE_LS = 'th-garmin-ui:v1';
 
+  // ---------------------------------------------------------------------
+  // Doação via Pix — o valor é livre (o QR não tem valor fixo).
+  // ---------------------------------------------------------------------
+  // QR estático sem valor (campo 54 ausente) — conferido: chave, recebedor e CRC.
+  const PIX = {
+    chave: '+5514996272582',        // vai para a área de transferência (celular com +55)
+    exibir: '(14) 99627-2582',
+    qr: 'assets/pix-qr.png',        // gerado a partir do código abaixo
+    copiaECola: '00020126360014BR.GOV.BCB.PIX0114+55149962725825204000053039865802BR5923FILIPE JEFTE DE CAMARGO6007MARILIA62070503***6304468D',
+    recebedor: 'Filipe Jefte de Camargo',
+  };
+
   const COLUNAS = {
     corrida: ['semana', 'etapa', 'dia', 'tipo', 'aquecimento_min', 'reps', 'esforco_min', 'esforco_zona', 'recuperacao_min', 'recuperacao_zona', 'desaquecimento_min', 'distancia_km', 'notas'],
     musculacao: ['semana', 'treino', 'grupo', 'bloco', 'tecnica', 'exercicio', 'series', 'reps', 'descanso_seg', 'notas'],
@@ -98,6 +110,57 @@
     };
   }
 
+  function proximaSegunda() {
+    const [y, m, d] = hoje.split('-').map(Number);
+    const wd = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+    return B.addDias(hoje, wd === 0 ? 0 : 7 - wd);
+  }
+
+  /** PDF do Time Híbrido → mesmo estado que a planilha (abas Corrida, Musculação, De-para). */
+  async function lerPdf(buf, nome) {
+    if (!window.THPdf) throw new Error('o leitor de PDF não carregou');
+    const paginas = await THPdf.extrairPaginas(buf, (n, t) => {
+      $('#relatorio').hidden = false;
+      $('#relatorio').className = 'relatorio';
+      $('#relatorio').innerHTML = `<span class="carregando"></span>Lendo o PDF… página ${n} de ${t}`;
+    });
+    const r = THPdf.lerPlano(paginas);
+    if (!r.corrida.length && !r.musculacao.length) {
+      throw new Error('não reconheci os treinos nesse PDF. Ele é o PDF do plano do Time Híbrido? (' + (r.avisos[0] || '') + ')');
+    }
+    r.corrida.forEach((x, i) => (x._id = 'c' + i));
+    r.musculacao.forEach((x, i) => (x._id = 'm' + i));
+    // De-para: o que já está aqui (inclui o que você escolheu na página) + o padrão do projeto
+    const depara = clone((S && S.atual && S.atual.depara) || []);
+    const tem = new Set(depara.map((d) => String(d.exercicio_pt || '').trim().toUpperCase()));
+    for (const d of (window.TH_DEPARA_PADRAO || [])) if (!tem.has(d.exercicio_pt)) depara.push(clone(d));
+    const dados = { corrida: r.corrida, musculacao: r.musculacao, depara };
+    // plano novo: começa na próxima segunda (dá para mudar no campo do topo)
+    const config = { ...clone((S && S.config) || CONFIG_PADRAO), inicio: proximaSegunda() };
+    return {
+      fonte: nome, carregadoEm: new Date().toISOString(),
+      base: dados, atual: clone(dados), leiame: THPdf.LEIA_ME,
+      colunas: clone(COLUNAS),
+      config,
+      configOriginal: null,
+      relatorio: { tipo: 'pdf', nome, plano: r.plano, semanas: r.semanas, paginas: paginas.length, avisos: r.avisos, visivel: true },
+    };
+  }
+
+  async function abrirArquivo(f) {
+    const pdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+    try {
+      const buf = await f.arrayBuffer();
+      iniciar(pdf ? await lerPdf(buf, f.name) : lerPlanilha(buf, f.name), { rolar: !pdf });
+      if (pdf) window.scrollTo({ top: 0, behavior: 'smooth' });   // mostra o relatório da leitura
+      toast(pdf ? `PDF "${f.name}" lido. Confira os treinos antes de enviar.` : `Planilha "${f.name}" carregada.`, 4000);
+    } catch (err) {
+      console.error(err);
+      if (S) renderRelatorio(); else $('#relatorio').hidden = true;
+      toast(`Não consegui ler ${pdf ? 'o PDF' : 'a planilha'}: ${err.message}`, 7000);
+    }
+  }
+
   function baixarPlanilha() {
     const wb = XLSX.utils.book_new();
     const sem = (rows, cols) => rows.map((r) => Object.fromEntries(cols.map((c) => [c, vazio(r[c]) ? null : r[c]])));
@@ -135,7 +198,13 @@
   // ---------------------------------------------------------------------
   const mapaDepara = (rows) => {
     const m = {};
-    rows.forEach((d) => { const pt = String(d.exercicio_pt || '').trim().toUpperCase(); if (pt) m[pt] = { cat: d.garmin_category, ex: d.garmin_exercise }; });
+    rows.forEach((d) => {
+      const pt = String(d.exercicio_pt || '').trim().toUpperCase();
+      if (!pt) return;
+      m[pt] = { cat: d.garmin_category, ex: d.garmin_exercise };
+      const solta = '~' + B.chaveSolta(pt);
+      if (!m[solta]) m[solta] = m[pt];
+    });
     return m;
   };
   const montar = (dados) => B.montarPlano({ corrida: dados.corrida, musculacao: dados.musculacao, depara: mapaDepara(dados.depara) }, S.config);
@@ -178,9 +247,31 @@
       (nE ? ` · <span class="tag-editado">${nE} editado${nE > 1 ? 's' : ''} aqui</span>` : '');
   }
 
+  function renderRelatorio() {
+    const box = $('#relatorio');
+    const r = S && S.relatorio;
+    if (!r || !r.visivel) { box.hidden = true; return; }
+    const nC = D.treinos.filter((t) => t.tipo === 'corrida').length;
+    const nM = D.treinos.length - nC;
+    const semPar = new Set();
+    D.treinos.forEach((t) => t.avisos.forEach((a) => { const m = a.match(/^"(.+)" sem par no De-para/); if (m) semPar.add(m[1]); }));
+    const itens = [...r.avisos];
+    if (!S.config.prefixo) itens.push('Se o seu Garmin já tem treinos de outro plano do Time Híbrido (S01 · …), escreva um prefixo em "Prefixo nos nomes" (ex.: 3K) antes de enviar, para os planos não se misturarem. O envio não mexe em treino de mesmo nome com outro conteúdo.');
+    if (semPar.size) itens.push(`${semPar.size} exercício${semPar.size > 1 ? 's' : ''} sem par no catálogo do Garmin (${[...semPar].slice(0, 4).join(', ')}${semPar.size > 4 ? '…' : ''}): abra o treino com ⚠ e clique em "escolher".`);
+    box.hidden = false;
+    box.className = 'relatorio' + (itens.length ? ' alerta' : '');
+    box.innerHTML = `
+      <button class="btn-x" data-fechar-relatorio aria-label="Fechar aviso">×</button>
+      <b>PDF lido${r.plano ? ` (${esc(r.plano)})` : ''}:</b> ${r.semanas} semanas · ${nC} corridas · ${nM} treinos de musculação (${r.paginas} páginas).
+      A semana 1 começa na segunda <b>${fmtData(S.config.inicio, false)}</b> (mude no campo acima se for outra data).
+      A leitura é automática — confira os treinos antes de enviar. <b>Baixar planilha</b> guarda tudo em .xlsx.
+      ${itens.length ? `<ul>${itens.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}`;
+  }
+
   function renderConfig() {
     $('#config').hidden = false;
     $('#cfg-inicio').value = S.config.inicio || '';
+    if (document.activeElement !== $('#cfg-prefixo')) $('#cfg-prefixo').value = S.config.prefixo || '';
     const [y, m, d] = (S.config.inicio || '').split('-').map(Number);
     const wd = S.config.inicio ? (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7 : 0;
     $('#cfg-inicio-aviso').textContent = S.config.inicio && wd !== 0 ? `Atenção: ${fmtData(S.config.inicio)} não é segunda-feira.` : '';
@@ -277,7 +368,8 @@
     const comAviso = sel.filter((t) => t.avisos.length);
     const passados = sel.filter((t) => t.data && t.data < hoje);
     const avisos = [];
-    const configMudou = JSON.stringify(S.config) !== JSON.stringify(S.configOriginal);
+    const datasDe = (c) => JSON.stringify([c && c.inicio, c && c.diasMusc]);
+    const configMudou = datasDe(S.config) !== datasDe(S.configOriginal);
     if (UI.envio.agendar === 'manter' && (configMudou || sel.some((t) => t.diaMudou))) {
       avisos.push('Você mudou datas aqui. Com "Manter as datas", o que já está no Garmin fica onde está — para mover, escolha "Colocar na data do plano".');
     }
@@ -320,6 +412,16 @@
       console.error(e);
       toast('Não consegui gerar o script: ' + e.message, 5000);
     }
+  }
+
+  async function copiarTexto(texto, msg) {
+    try { await navigator.clipboard.writeText(texto); }
+    catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = texto; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); ta.remove();
+    }
+    toast(msg);
   }
 
   async function copiarScript() {
@@ -430,7 +532,8 @@
     let ultimoBloco = null, faixa = false;
     const tr = linhas.map((r) => {
       if (String(r.bloco) !== ultimoBloco) { faixa = !faixa; ultimoBloco = String(r.bloco); }
-      const m = dp[String(r.exercicio || '').trim().toUpperCase()];
+      const up = String(r.exercicio || '').trim().toUpperCase();
+      const m = dp[up] || dp['~' + B.chaveSolta(up)];
       const garmin = m && m.cat && m.ex
         ? `<button class="chip" data-mapa="${esc(r._id)}" title="Trocar o exercício do Garmin (vale para todos os treinos com esse nome)">${esc(m.ex.replace(/_/g, ' ').toLowerCase())}</button>`
         : `<button class="chip chip-aviso" data-mapa="${esc(r._id)}">⚠ escolher</button>`;
@@ -497,6 +600,7 @@
     recalcular();
     salvar();
     invalidarScript();
+    renderRelatorio();
     renderFonte();
     renderSemanas();
     renderEnvio();
@@ -640,7 +744,8 @@
     const nome = String(r.exercicio || '').trim();
     if (!nome) { toast('Escreva o nome do exercício primeiro.'); return; }
     const cat = await garantirCatalogo();
-    const atual = mapaDepara(S.atual.depara)[nome.toUpperCase()];
+    const mapa = mapaDepara(S.atual.depara);
+    const atual = mapa[nome.toUpperCase()] || mapa['~' + B.chaveSolta(nome)];
     tr.hidden = false;
     tr.firstElementChild.innerHTML = cat.length
       ? `<div class="mapa">
@@ -680,10 +785,26 @@
       const f = e.target.files[0];
       e.target.value = '';
       if (!f) return;
-      if (D.treinos.some((t) => t.editado) && !confirm('Abrir outra planilha descarta as edições feitas aqui. Continuar?')) return;
-      try { iniciar(lerPlanilha(await f.arrayBuffer(), f.name)); toast(`Planilha "${f.name}" carregada.`); }
-      catch (err) { toast('Não consegui ler a planilha: ' + err.message, 5000); }
+      if (D.treinos.some((t) => t.editado) && !confirm('Abrir outro arquivo descarta as edições feitas aqui. Continuar?')) return;
+      abrirArquivo(f);
     });
+    $('#relatorio').addEventListener('click', (e) => {
+      if (!e.target.closest('[data-fechar-relatorio]')) return;
+      if (S && S.relatorio) { S.relatorio.visivel = false; salvar(); }
+      renderRelatorio();
+    });
+
+    // doação
+    $('#pix-chave').textContent = PIX.exibir;
+    const qr = $('#pix-qr');
+    qr.addEventListener('error', () => { $('#pix-qr-box').hidden = true; });
+    qr.src = PIX.qr;
+    if (PIX.copiaECola) { $('#pix-cc').textContent = PIX.copiaECola; $('#pix-cc-box').hidden = false; }
+    if (PIX.recebedor) { $('#pix-recebedor').textContent = `Recebedor: ${PIX.recebedor}`; $('#pix-recebedor').hidden = false; }
+    $('#btn-apoiar').addEventListener('click', () => $('#doacao').showModal());
+    $('#doacao').addEventListener('click', (e) => { if (e.target === $('#doacao')) $('#doacao').close(); }); // clique fora fecha
+    $('#btn-copiar-chave').addEventListener('click', () => copiarTexto(PIX.chave, 'Chave Pix copiada. Obrigado pelo apoio!'));
+    $('#btn-copiar-cc').addEventListener('click', () => copiarTexto(PIX.copiaECola, 'Código Pix copiado — cole no app do banco.'));
     $('#btn-baixar').addEventListener('click', baixarPlanilha);
     $('#btn-recarregar').addEventListener('click', async () => {
       $('.menu').open = false;
@@ -700,6 +821,11 @@
     });
 
     $('#cfg-inicio').addEventListener('change', (e) => { S.config.inicio = e.target.value; salvar(); recalcular(); renderTudo(); });
+    // o prefixo muda o nome de todos — a base acompanha, para isso não contar como edição
+    $('#cfg-prefixo').addEventListener('input', (e) => {
+      S.config.prefixo = e.target.value.trim().toUpperCase().replace(/[^\p{L}\p{N}\-_.]/gu, '');
+      salvar(); recalcularBase(); recalcular(); invalidarScript(); renderTudo();
+    });
     $('#cfg-dias').addEventListener('change', (e) => {
       const s = e.target.closest('select[data-treino]');
       if (!s) return;
@@ -799,13 +925,14 @@
   }
 
   function renderTudo() {
+    renderRelatorio();
     renderFonte();
     renderConfig();
     renderSemanas();
     renderEnvio();
   }
 
-  function iniciar(estado) {
+  function iniciar(estado, opcoes = {}) {
     S = estado;
     S.config = { ...clone(CONFIG_PADRAO), ...(S.config || {}) };
     S.config.diasMusc = { ...CONFIG_PADRAO.diasMusc, ...(S.config.diasMusc || {}) };
@@ -818,22 +945,20 @@
     invalidarScript();
     renderTudo();
     const atual = $('.semana-atual');
-    if (atual) setTimeout(() => atual.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    if (atual && opcoes.rolar !== false) setTimeout(() => atual.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
   }
 
   function semPlanilha(motivo) {
     $('#semanas').innerHTML = `
       <div class="vazio">
-        <p class="vazio-titulo">Abra a planilha do plano</p>
+        <p class="vazio-titulo">Abra o seu plano</p>
         <p>${esc(motivo)}</p>
-        <label class="btn btn-escuro"><input type="file" accept=".xlsx,.xlsm" hidden id="arquivo-vazio">Escolher time_hibrido.xlsx</label>
-        <p class="nota">Ela fica só no seu navegador — nada é enviado para lugar nenhum.</p>
+        <label class="btn btn-escuro"><input type="file" accept=".pdf,.xlsx,.xlsm" hidden id="arquivo-vazio">Escolher o PDF do Time Híbrido ou a planilha</label>
+        <p class="nota">O arquivo é lido aqui no seu navegador — nada é enviado para lugar nenhum.</p>
       </div>`;
-    $('#arquivo-vazio').addEventListener('change', async (e) => {
+    $('#arquivo-vazio').addEventListener('change', (e) => {
       const f = e.target.files[0];
-      if (!f) return;
-      try { iniciar(lerPlanilha(await f.arrayBuffer(), f.name)); }
-      catch (err) { toast('Não consegui ler a planilha: ' + err.message, 5000); }
+      if (f) abrirArquivo(f);
     });
   }
 
@@ -845,7 +970,7 @@
     try { iniciar(await carregarDoProjeto()); }
     catch (e) {
       semPlanilha(location.protocol === 'file:'
-        ? 'Aberta direto do disco, a página não consegue ler data/time_hibrido.xlsx sozinha. Escolha o arquivo abaixo (ou rode py -m http.server na pasta).'
+        ? 'Aberta direto do disco, a página não consegue ler data/time_hibrido.xlsx sozinha. Escolha o PDF do plano ou a planilha abaixo (ou rode py -m http.server na pasta).'
         : `Não achei ${PLANILHA_PROJETO} no projeto.`);
     }
   }
